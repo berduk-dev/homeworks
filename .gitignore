@@ -1,0 +1,31 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build dirs
+bin/
+build/
+dist/
+
+# Coverage / profiling
+*.cover
+coverage.out
+
+# Go modules cache (НЕ игнорируй go.mod и go.sum!)
+# (ничего не нужно для cache — он не в проекте)
+
+# Vendor (если не коммитишь его)
+vendor/
+
+# IDE
+.idea/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
