@@ -145,4 +145,5 @@ func (h *Handler) Analytics(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"total_redirects": count})
+	c.JSON(200, gin.H{"total_redirects": count})
 }
