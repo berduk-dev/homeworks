@@ -21,6 +21,7 @@ func main() {
 	linksHandler := handler.NewHandler(conn)
 
 	r.POST("/shorten", linksHandler.CreateLink)
+	r.POST("/shorten/:custom", linksHandler.CreateLink)
 	r.GET("/:path", linksHandler.Redirect)
 	r.GET("/analytics/:short_url", linksHandler.Analytics)
 

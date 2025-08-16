@@ -46,19 +46,56 @@ func (h *Handler) CreateLink(c *gin.Context) {
 	var shortLink string
 	row := h.db.QueryRow(c, "SELECT short_link FROM links WHERE long_link = $1", req.Link)
 	err = row.Scan(&shortLink)
-	if errors.Is(err, pgx.ErrNoRows) {
-		log.Println("Ошибка БД во время проверки на long_link: ", err)
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Println("Ошибка при проверке long_link в БД: ", err)
+		c.JSON(http.StatusInternalServerError, "Что-то пошло не так. Попробуйте позже!")
+		return
+	} else if err == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"short": HostURL + shortLink,
+			"long":  req.Link,
+		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"short": HostURL + shortLink,
-		"long":  req.Link,
-	})
+
+	// Кастомная ссылка
+	customURL := c.Param("custom")
+	var shortLinkCheck string
+	if customURL != "" {
+		for _, r := range []rune(customURL) {
+			if !((r >= 'a' && r <= 'z') ||
+				(r >= 'A' && r <= 'Z') ||
+				(r >= '0' && r <= '9') ||
+				r == '-') {
+				c.JSON(http.StatusBadRequest, "Кастомная ссылка содержит недопустимые символы.")
+				return
+			}
+			row = h.db.QueryRow(c, "SELECT short_link FROM links WHERE short_link = $1", shortLink)
+			err = row.Scan(&shortLinkCheck)
+			if errors.Is(err, pgx.ErrNoRows) { // если короткая ссылка не занята
+				// Добавляем в БД
+				_, err = h.db.Exec(c, "INSERT INTO links (long_link, short_link) VALUES ($1, $2)", req.Link, customURL)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
+					return
+				}
+
+				c.JSON(http.StatusOK, gin.H{
+					"short": HostURL + customURL,
+					"long":  req.Link,
+				})
+				return
+			} else if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"Ошибка в БД": err})
+				return
+			} else { // если короткая ссылка уже занята
+				c.JSON(http.StatusConflict, "Такая ссылка уже существует! Попробуйте другую")
+				return
+			}
+		}
+	}
 
 	// Генерация короткой ссылки и проверка на её наличие в БД
-	var shortLinkCheck string
 	for {
 		b := make([]byte, 6)
 		_, err := rand.Read(b)
@@ -110,6 +147,7 @@ func (h *Handler) Redirect(c *gin.Context) {
 		"INSERT INTO redirects (long_link, short_link, user_agent) VALUES ($1, $2, $3)",
 		longLink, shortLink, c.Request.UserAgent())
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, "Произошла ошибка. Попробуйте позже!")
 		log.Println("Ошибка во время добавления в БД: ", err)
 		return
 	}
@@ -140,7 +178,7 @@ func (h *Handler) Analytics(c *gin.Context) {
 		return
 	}
 	var count int
-	err = h.db.QueryRow(c, "SELECT COUNT(short_linkgid ) FROM redirects WHERE short_link = $1", shortLink).Scan(&count)
+	err = h.db.QueryRow(c, "SELECT COUNT(*) FROM redirects WHERE short_link = $1", shortLink).Scan(&count)
 	if errors.Is(err, pgx.ErrNoRows) {
 		c.JSON(500, gin.H{"error": "database error"})
 		log.Println("database error: ", err)
