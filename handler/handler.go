@@ -46,13 +46,16 @@ func (h *Handler) CreateLink(c *gin.Context) {
 	var shortLink string
 	row := h.db.QueryRow(c, "SELECT short_link FROM links WHERE long_link = $1", req.Link)
 	err = row.Scan(&shortLink)
-	if err == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"short": HostURL + shortLink,
-			"long":  req.Link,
-		})
+	if errors.Is(err, pgx.ErrNoRows) {
+		log.Println("Ошибка БД во время проверки на long_link: ", err)
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{
+		"short": HostURL + shortLink,
+		"long":  req.Link,
+	})
 
 	// Генерация короткой ссылки и проверка на её наличие в БД
 	var shortLinkCheck string
