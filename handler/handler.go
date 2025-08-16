@@ -21,11 +21,11 @@ type Handler struct {
 }
 
 type Analytics struct {
-	ID        int    `json:"id"`
-	LongLink  string `json:"long_link"`
-	ShortLink string `json:"short_link"`
-	UserAgent string `json:"user_agent"`
-	CreatedAt string `json:"created_at"`
+	ID        int       `json:"id"`
+	LongLink  string    `json:"long_link"`
+	ShortLink string    `json:"short_link"`
+	UserAgent string    `json:"user_agent"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewHandler(db *pgx.Conn) Handler {
@@ -110,7 +110,7 @@ func (h *Handler) Redirect(c *gin.Context) {
 		"INSERT INTO redirects (long_link, short_link, user_agent) VALUES ($1, $2, $3)",
 		longLink, shortLink, c.Request.UserAgent())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, "Произошла ошибка при добавлении в БД redirects. Попробуйте позже!")
+		log.Println("Ошибка во время добавления в БД: ", err)
 		return
 	}
 }
@@ -119,22 +119,20 @@ func (h *Handler) Analytics(c *gin.Context) {
 	shortLink := c.Param("short_url")
 	rows, err := h.db.Query(c, "SELECT id, long_link, short_link, user_agent,created_at FROM redirects WHERE short_link = $1", shortLink)
 
-	var ID int
-	var longLink, userAgent string
-	var createdAt time.Time
+	analytics := Analytics{}
 	for rows.Next() {
-		err := rows.Scan(&ID, &longLink, &shortLink, &userAgent, &createdAt)
+		err := rows.Scan(&analytics.ID, &analytics.LongLink, &analytics.ShortLink, &analytics.UserAgent, &analytics.CreatedAt)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, "Ошибка при выводе аналитики!")
 			log.Println(err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"id":         ID,
-			"long_link":  longLink,
-			"short_link": shortLink,
-			"user_agent": userAgent,
-			"created_at": createdAt,
+			"id":         analytics.ID,
+			"long_link":  analytics.LongLink,
+			"short_link": analytics.ShortLink,
+			"user_agent": analytics.UserAgent,
+			"created_at": analytics.CreatedAt,
 		})
 	}
 	if err = rows.Err(); err != nil {
@@ -142,11 +140,14 @@ func (h *Handler) Analytics(c *gin.Context) {
 		return
 	}
 	var count int
-	err = h.db.QueryRow(c, "SELECT COUNT(*) FROM redirects").Scan(&count)
-	if err != nil {
+	err = h.db.QueryRow(c, "SELECT COUNT(short_linkgid ) FROM redirects WHERE short_link = $1", shortLink).Scan(&count)
+	if errors.Is(err, pgx.ErrNoRows) {
 		c.JSON(500, gin.H{"error": "database error"})
+		log.Println("database error: ", err)
+		return
+	} else if err != nil {
+		log.Println("Ошибка в выводе total_redirects: ", err)
 		return
 	}
-	c.JSON(200, gin.H{"total_redirects": count})
 	c.JSON(200, gin.H{"total_redirects": count})
 }
