@@ -14,7 +14,8 @@ import (
 const HostURL = "127.0.0.1:8080/"
 
 type CreateLinkRequest struct {
-	Link string `json:"link"`
+	Link   string `json:"link"`
+	Custom string `json:"custom"`
 }
 type Handler struct {
 	db *pgx.Conn
@@ -59,46 +60,42 @@ func (h *Handler) CreateLink(c *gin.Context) {
 	}
 
 	// Кастомная ссылка
-	customURL := c.Param("custom")
 	var shortLinkCheck string
-	if customURL != "" {
-		for _, r := range []rune(customURL) {
-			if !((r >= 'a' && r <= 'z') ||
-				(r >= 'A' && r <= 'Z') ||
-				(r >= '0' && r <= '9') ||
-				r == '-') {
+	if req.Custom != "" {
+		for _, r := range []rune(req.Custom) {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
 				c.JSON(http.StatusBadRequest, "Кастомная ссылка содержит недопустимые символы.")
 				return
 			}
-			row = h.db.QueryRow(c, "SELECT short_link FROM links WHERE short_link = $1", shortLink)
-			err = row.Scan(&shortLinkCheck)
-			if errors.Is(err, pgx.ErrNoRows) { // если короткая ссылка не занята
-				// Добавляем в БД
-				_, err = h.db.Exec(c, "INSERT INTO links (long_link, short_link) VALUES ($1, $2)", req.Link, customURL)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
-					return
-				}
-
-				c.JSON(http.StatusOK, gin.H{
-					"short": HostURL + customURL,
-					"long":  req.Link,
-				})
-				return
-			} else if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"Ошибка в БД": err})
-				return
-			} else { // если короткая ссылка уже занята
-				c.JSON(http.StatusConflict, "Такая ссылка уже существует! Попробуйте другую")
+		}
+		row = h.db.QueryRow(c, "SELECT short_link FROM links WHERE short_link = $1", req.Custom)
+		err = row.Scan(&shortLinkCheck)
+		if errors.Is(err, pgx.ErrNoRows) { // если короткая ссылка не занята
+			// Добавляем в БД
+			_, err = h.db.Exec(c, "INSERT INTO links (long_link, short_link) VALUES ($1, $2)", req.Link, req.Custom)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
 				return
 			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"long":   req.Link,
+				"custom": HostURL + req.Custom,
+			})
+			return
+		} else if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"Ошибка в БД": err})
+			return
+		} else { // если короткая ссылка уже занята
+			c.JSON(http.StatusConflict, "Такая короткая ссылка уже существует! Попробуйте другую")
+			return
 		}
 	}
 
 	// Генерация короткой ссылки и проверка на её наличие в БД
 	for {
 		b := make([]byte, 6)
-		_, err := rand.Read(b)
+		_, err = rand.Read(b)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"Внутрення ошибка": err})
 		}
@@ -159,7 +156,7 @@ func (h *Handler) Analytics(c *gin.Context) {
 
 	analytics := Analytics{}
 	for rows.Next() {
-		err := rows.Scan(&analytics.ID, &analytics.LongLink, &analytics.ShortLink, &analytics.UserAgent, &analytics.CreatedAt)
+		err = rows.Scan(&analytics.ID, &analytics.LongLink, &analytics.ShortLink, &analytics.UserAgent, &analytics.CreatedAt)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, "Ошибка при выводе аналитики!")
 			log.Println(err)
@@ -179,13 +176,10 @@ func (h *Handler) Analytics(c *gin.Context) {
 	}
 	var count int
 	err = h.db.QueryRow(c, "SELECT COUNT(*) FROM redirects WHERE short_link = $1", shortLink).Scan(&count)
-	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(500, gin.H{"error": "database error"})
-		log.Println("database error: ", err)
-		return
-	} else if err != nil {
+	if err != nil {
 		log.Println("Ошибка в выводе total_redirects: ", err)
 		return
 	}
+
 	c.JSON(200, gin.H{"total_redirects": count})
 }
