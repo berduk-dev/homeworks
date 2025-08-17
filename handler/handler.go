@@ -21,7 +21,7 @@ type Handler struct {
 	db *pgx.Conn
 }
 
-type Analytics struct {
+type Redirect struct {
 	ID        int       `json:"id"`
 	LongLink  string    `json:"long_link"`
 	ShortLink string    `json:"short_link"`
@@ -74,7 +74,8 @@ func (h *Handler) CreateLink(c *gin.Context) {
 			// Добавляем в БД
 			_, err = h.db.Exec(c, "INSERT INTO links (long_link, short_link) VALUES ($1, $2)", req.Link, req.Custom)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже")
+				log.Println("Ошибка при добавлении в БД: ", err)
+				c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 				return
 			}
 
@@ -84,10 +85,11 @@ func (h *Handler) CreateLink(c *gin.Context) {
 			})
 			return
 		} else if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"Ошибка в БД": err})
+			log.Println("Произошла ошибка: ", err)
+			c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 			return
 		} else { // если короткая ссылка уже занята
-			c.JSON(http.StatusConflict, "Такая короткая ссылка уже существует! Попробуйте другую")
+			c.JSON(http.StatusConflict, "Такая короткая ссылка уже существует! Попробуйте другую.")
 			return
 		}
 	}
@@ -154,32 +156,27 @@ func (h *Handler) Analytics(c *gin.Context) {
 	shortLink := c.Param("short_url")
 	rows, err := h.db.Query(c, "SELECT id, long_link, short_link, user_agent,created_at FROM redirects WHERE short_link = $1", shortLink)
 
-	analytics := Analytics{}
+	var redirects []Redirect
 	for rows.Next() {
-		err = rows.Scan(&analytics.ID, &analytics.LongLink, &analytics.ShortLink, &analytics.UserAgent, &analytics.CreatedAt)
+		var redirect Redirect
+		err = rows.Scan(&redirect.ID, &redirect.LongLink, &redirect.ShortLink, &redirect.UserAgent, &redirect.CreatedAt)
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, "Ошибка при выводе аналитики!")
 			log.Println(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"id":         analytics.ID,
-			"long_link":  analytics.LongLink,
-			"short_link": analytics.ShortLink,
-			"user_agent": analytics.UserAgent,
-			"created_at": analytics.CreatedAt,
-		})
+		redirects = append(redirects, redirect)
 	}
 	if err = rows.Err(); err != nil {
 		c.JSON(http.StatusInternalServerError, "Ошибка БД Query.")
 		return
 	}
-	var count int
-	err = h.db.QueryRow(c, "SELECT COUNT(*) FROM redirects WHERE short_link = $1", shortLink).Scan(&count)
-	if err != nil {
-		log.Println("Ошибка в выводе total_redirects: ", err)
+
+	if len(redirects) != 0 {
+		c.JSON(http.StatusOK, gin.H{"redirects": redirects, "total_count": len(redirects)})
 		return
 	}
-
-	c.JSON(200, gin.H{"total_redirects": count})
+	c.JSON(http.StatusNotFound, "Записей нет")
+	return
 }
