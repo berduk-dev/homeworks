@@ -3,10 +3,9 @@ package main
 import (
 	"context"
 	"github.com/berduk-dev/networks/handler"
-	"log"
-
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"log"
 )
 
 func main() {
