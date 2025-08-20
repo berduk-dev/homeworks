@@ -55,7 +55,8 @@ func (h *Handler) CreateLink(c *gin.Context) {
 	}
 
 	// Кастомная ссылка
-	if req.Custom != "" && len(req.Custom) == ShortLinkLength {
+
+	if IsLinkValid(req.Custom) {
 		for _, r := range []rune(req.Custom) {
 			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
 				c.JSON(http.StatusBadRequest, "Кастомная ссылка содержит недопустимые символы.")
@@ -63,8 +64,8 @@ func (h *Handler) CreateLink(c *gin.Context) {
 			}
 		}
 
-		isExist, err := h.LinksRepository.IsShortExists(c, req.Custom)
-		if !isExist {
+		isExists, err := h.LinksRepository.IsShortExists(c, req.Custom)
+		if !isExists {
 			if err != nil {
 				log.Println("Произошла ошибка: ", err)
 				c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
@@ -132,15 +133,15 @@ func (h *Handler) Redirect(c *gin.Context) {
 			c.JSON(http.StatusNotFound, "Ссылка не найдена!")
 			return
 		}
+		log.Println("GetLongByShort error: ", err)
 		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 		return
 	}
 
-	err = h.LinksRepository.CreateAnalytics(c, longLink, shortLink, c.Request.UserAgent())
+	err = h.LinksRepository.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, "Произошла ошибка. Попробуйте позже!")
-		log.Println("Ошибка во время добавления в БД: ", err)
-		return
+		log.Println("error CreateAnalytics: ", err)
 	}
 
 	c.Redirect(http.StatusTemporaryRedirect, longLink)
@@ -148,10 +149,18 @@ func (h *Handler) Redirect(c *gin.Context) {
 }
 
 func (h *Handler) Analytics(c *gin.Context) {
-	redirects, err := h.LinksRepository.GetAnalytics(c)
-	if err == nil {
-		c.JSON(http.StatusOK, gin.H{"redirects": redirects, "total_count": len(redirects)})
+	redirects, err := h.LinksRepository.GetRedirects(c)
+	if err != nil {
+		log.Println("Ошибка получения аналитики: ", err)
+		c.JSON(http.StatusInternalServerError, "Ошибка при получении аналитики")
 		return
 	}
-	return
+	c.JSON(http.StatusOK, gin.H{"redirects": redirects, "total_count": len(redirects)})
+}
+
+func IsLinkValid(customLink string) bool {
+	if customLink != "" && len(customLink) == ShortLinkLength {
+		return true
+	}
+	return false
 }
