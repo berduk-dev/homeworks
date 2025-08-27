@@ -21,6 +21,7 @@ const (
 type Handler struct {
 	LinksRepository *repo.Repository
 	LinksCache      *cache.LinksCache
+	LinksManager    *manager.LinksManager
 }
 
 type CreateLinkRequest struct {
@@ -33,6 +34,13 @@ func New(linksRepo *repo.Repository, linksCache *cache.LinksCache) Handler {
 		LinksRepository: linksRepo,
 		LinksCache:      linksCache,
 	}
+}
+
+func IsLinkValid(customLink string) bool {
+	if customLink != "" && len(customLink) == ShortLinkLength {
+		return true
+	}
+	return false
 }
 
 func (h *Handler) CreateLink(c *gin.Context) {
@@ -130,11 +138,9 @@ func (h *Handler) CreateLink(c *gin.Context) {
 }
 
 func (h *Handler) Redirect(c *gin.Context) {
-	linksManager := manager.New(h.LinksRepository, h.LinksCache)
-
 	shortLink := c.Param("path")
 
-	longLink, err := linksManager.Redirect(c, shortLink)
+	longLink, err := h.LinksManager.Redirect(c, shortLink)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, "Ссылка не найдена!")
@@ -143,7 +149,7 @@ func (h *Handler) Redirect(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 	}
 
-	err = linksManager.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
+	err = h.LinksManager.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, "Произошла ошибка. Попробуйте позже!")
 		log.Println("error CreateAnalytics: ", err)
@@ -161,11 +167,4 @@ func (h *Handler) Analytics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"redirects": redirects, "total_count": len(redirects)})
-}
-
-func IsLinkValid(customLink string) bool {
-	if customLink != "" && len(customLink) == ShortLinkLength {
-		return true
-	}
-	return false
 }

@@ -45,6 +45,7 @@ func main() {
 	linksRepository := repo.New(conn)
 	linksCache := cache.New(rdb)
 	linksHandler := handler.New(&linksRepository, linksCache)
+	//linksManager := manager.New(&linksRepository, linksCache)
 
 	go func() { // TODO: Вынести из main.go в другое место
 		err := cachePopularLinks(&linksRepository, linksCache)
