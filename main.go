@@ -2,14 +2,35 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"github.com/berduk-dev/networks/cache"
 	"github.com/berduk-dev/networks/handler"
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
+	"github.com/berduk-dev/networks/repo"
+	"time"
+
 	"log"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis"
+	"github.com/jackc/pgx/v5"
 )
 
+const cacheLinksInterval = time.Hour
+
 func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+
+	// проверяем соединение
+	_, err := rdb.Ping().Result()
+	if err != nil {
+		log.Fatalf("Ошибка подключения к Redis: %v", err)
+	}
+
 	connString := "postgres://admin:admin@localhost:5432/links"
 	conn, err := pgx.Connect(context.Background(), connString)
 	if err != nil {
@@ -18,7 +39,24 @@ func main() {
 
 	r := gin.Default()
 
-	linksHandler := handler.NewHandler(conn)
+	linksRepository := repo.New(conn)
+	linksCache := cache.New(rdb)
+	linksHandler := handler.New(&linksRepository, linksCache)
+
+	go func() { // TODO: Вынести из main.go в другое место
+		err := cachePopularLinks(&linksRepository, linksCache)
+		if err != nil {
+			log.Println("error cachePopularLinks:", err)
+		}
+
+		c := time.Tick(cacheLinksInterval)
+		for range c {
+			err := cachePopularLinks(&linksRepository, linksCache)
+			if err != nil {
+				log.Println("error cachePopularLinks:", err)
+			}
+		}
+	}()
 
 	// --- CORS middleware ---
 	r.Use(func(c *gin.Context) {
@@ -41,11 +79,26 @@ func main() {
 		c.Next()
 	})
 
-	// Твои API-роуты:
+	// API-роуты:
 	r.POST("/shorten", linksHandler.CreateLink)
 	r.POST("/shorten/:custom", linksHandler.CreateLink) // можно убрать, если перешёл на JSON-поле "custom"
-	r.GET("/:path", linksHandler.Redirect)
 	r.GET("/analytics/:short_url", linksHandler.Analytics)
+	r.GET("/:path", linksHandler.Redirect)
 
-	r.Run("127.0.0.1:8080")
+	r.Run()
+}
+
+func cachePopularLinks(linksRepository *repo.Repository, linksCache *cache.LinksCache) error {
+	links, err := linksRepository.GetPopularLinks(context.Background(), 10)
+	if err != nil {
+		return fmt.Errorf("error updateCache GetPopularLinks: %w", err)
+	}
+
+	for _, link := range links {
+		err := linksCache.StoreLink(link.Short, link.Long)
+		if err != nil {
+			return fmt.Errorf("error updateCache StoreLink: %w", err)
+		}
+	}
+	return nil
 }

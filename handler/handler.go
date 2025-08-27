@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"github.com/berduk-dev/networks/cache"
 	"github.com/berduk-dev/networks/repo"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -16,17 +17,20 @@ const (
 	ShortLinkLength = 6
 )
 
+type Handler struct {
+	LinksRepository *repo.Repository
+	LinksCache      *cache.LinksCache
+}
+
 type CreateLinkRequest struct {
 	Link   string `json:"link"`
 	Custom string `json:"custom"`
 }
-type Handler struct {
-	LinksRepository repo.Repository
-}
 
-func NewHandler(db *pgx.Conn) Handler {
+func New(linksRepo *repo.Repository, linksCache *cache.LinksCache) Handler {
 	return Handler{
-		LinksRepository: repo.NewRepo(db),
+		LinksRepository: linksRepo,
+		LinksCache:      linksCache,
 	}
 }
 
@@ -127,15 +131,23 @@ func (h *Handler) CreateLink(c *gin.Context) {
 func (h *Handler) Redirect(c *gin.Context) {
 	shortLink := c.Param("path")
 
-	longLink, err := h.LinksRepository.GetLongByShort(c, shortLink)
+	// сначала посмотреть в кэше
+	longLink, err := h.LinksCache.GetLink(shortLink)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			c.JSON(http.StatusNotFound, "Ссылка не найдена!")
+		log.Println("error LinksCache.GetLink: ", err)
+	}
+
+	if longLink == "" {
+		longLink, err = h.LinksRepository.GetLongByShort(c, shortLink)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, "Ссылка не найдена!")
+				return
+			}
+			log.Println("GetLongByShort error: ", err)
+			c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 			return
 		}
-		log.Println("GetLongByShort error: ", err)
-		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
-		return
 	}
 
 	err = h.LinksRepository.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())

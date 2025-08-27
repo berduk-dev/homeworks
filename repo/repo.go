@@ -1,7 +1,9 @@
 package repo
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"log"
@@ -13,8 +15,10 @@ type Repository struct {
 	db *pgx.Conn
 }
 
-func NewRepo(db *pgx.Conn) Repository {
-	return Repository{db: db}
+func New(db *pgx.Conn) Repository {
+	return Repository{
+		db: db,
+	}
 }
 
 type Redirect struct {
@@ -23,6 +27,11 @@ type Redirect struct {
 	ShortLink string    `json:"short_link"`
 	UserAgent string    `json:"user_agent"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type LinkPair struct {
+	Short string
+	Long  string
 }
 
 func (r *Repository) CreateLink(c *gin.Context, longLink string, shortLink string) error {
@@ -98,4 +107,34 @@ func (r *Repository) IsShortExists(c *gin.Context, shortLink string) (bool, erro
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Repository) GetPopularLinks(ctx context.Context, n int) ([]LinkPair, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`select
+				short_link,
+				long_link
+		   from redirects
+	   group by short_link, long_link
+	   order by count(id) desc
+		  limit $1;`,
+		n,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error GetPopularLinks: %w", err)
+	}
+
+	res := make([]LinkPair, 0, n)
+
+	for rows.Next() {
+		linkPair := LinkPair{}
+		err := rows.Scan(&linkPair.Short, &linkPair.Long)
+		if err != nil {
+			return nil, fmt.Errorf("error GetPopularLinks Scan: %w", err)
+		}
+		res = append(res, linkPair)
+	}
+
+	return res, nil
 }
