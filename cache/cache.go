@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const popularLinksTTL = time.Hour
+
 type LinksCache struct {
 	rdb *redis.Client
 }
@@ -18,7 +20,7 @@ func New(rdb *redis.Client) *LinksCache {
 }
 
 func (c *LinksCache) StoreLink(shortLink string, longLink string) error {
-	cmd := c.rdb.Set(shortLink, longLink, time.Hour)
+	cmd := c.rdb.Set(shortLink, longLink, popularLinksTTL)
 	if cmd.Err() != nil {
 		return fmt.Errorf("error StoreLink: %w", cmd.Err())
 	}

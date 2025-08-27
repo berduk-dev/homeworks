@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/berduk-dev/networks/cache"
+	"github.com/berduk-dev/networks/manager"
 	"github.com/berduk-dev/networks/repo"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -129,28 +130,20 @@ func (h *Handler) CreateLink(c *gin.Context) {
 }
 
 func (h *Handler) Redirect(c *gin.Context) {
+	linksManager := manager.New(h.LinksRepository, h.LinksCache)
+
 	shortLink := c.Param("path")
 
-	// сначала посмотреть в кэше
-	longLink, err := h.LinksCache.GetLink(shortLink)
+	longLink, err := linksManager.Redirect(c, shortLink)
 	if err != nil {
-		log.Println("error LinksCache.GetLink: ", err)
-	}
-
-	if longLink == "" {
-		longLink, err = h.LinksRepository.GetLongByShort(c, shortLink)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				c.JSON(http.StatusNotFound, "Ссылка не найдена!")
-				return
-			}
-			log.Println("GetLongByShort error: ", err)
-			c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
-			return
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, "Ссылка не найдена!")
 		}
+		log.Println("GetLongByShort error: ", err)
+		c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
 	}
 
-	err = h.LinksRepository.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
+	err = linksManager.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, "Произошла ошибка. Попробуйте позже!")
 		log.Println("error CreateAnalytics: ", err)

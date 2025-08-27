@@ -16,7 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const cacheLinksInterval = time.Hour
+const (
+	cacheLinksInterval = time.Hour
+	popularLinksCount  = 10
+)
 
 func main() {
 	rdb := redis.NewClient(&redis.Options{
@@ -58,7 +61,7 @@ func main() {
 		}
 	}()
 
-	// --- CORS middleware ---
+	// --- CORS middleware ----
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		if origin == "" || origin == "null" {
@@ -89,7 +92,7 @@ func main() {
 }
 
 func cachePopularLinks(linksRepository *repo.Repository, linksCache *cache.LinksCache) error {
-	links, err := linksRepository.GetPopularLinks(context.Background(), 10)
+	links, err := linksRepository.GetPopularLinks(context.Background(), popularLinksCount)
 	if err != nil {
 		return fmt.Errorf("error updateCache GetPopularLinks: %w", err)
 	}
