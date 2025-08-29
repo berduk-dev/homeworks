@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"github.com/berduk-dev/networks/cache"
 	"github.com/berduk-dev/networks/handler"
+	"github.com/berduk-dev/networks/manager"
 	"github.com/berduk-dev/networks/repo"
+	"github.com/berduk-dev/networks/service"
 	"time"
 
 	"log"
@@ -44,8 +46,9 @@ func main() {
 
 	linksRepository := repo.New(conn)
 	linksCache := cache.New(rdb)
-	linksHandler := handler.New(&linksRepository, linksCache)
-	//linksManager := manager.New(&linksRepository, linksCache)
+	linksManager := manager.New(linksCache, &linksRepository)
+	linksService := service.New(linksManager)
+	linksHandler := handler.New(linksManager, *linksService)
 
 	go func() { // TODO: Вынести из main.go в другое место
 		err := cachePopularLinks(&linksRepository, linksCache)
@@ -86,7 +89,7 @@ func main() {
 	// API-роуты:
 	r.POST("/shorten", linksHandler.CreateLink)
 	r.POST("/shorten/:custom", linksHandler.CreateLink) // можно убрать, если перешёл на JSON-поле "custom"
-	r.GET("/analytics/:short_url", linksHandler.Analytics)
+	r.GET("/analytics/:short_url", linksHandler.GetAnalytics)
 	r.GET("/:path", linksHandler.Redirect)
 
 	r.Run()

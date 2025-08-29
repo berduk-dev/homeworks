@@ -3,77 +3,69 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/berduk-dev/networks/cache"
+	errors2 "github.com/berduk-dev/networks/errors"
 	"github.com/berduk-dev/networks/repo"
-	"github.com/gin-gonic/gin"
+	//"github.com/berduk-dev/networks/service"
 	"github.com/jackc/pgx/v5"
-	"log"
-	"net/http"
 )
 
 type LinksManager struct {
-	LinksRepo  *repo.Repository
-	LinksCache *cache.LinksCache
+	cache *cache.LinksCache
+	repo  *repo.Repository
 }
 
-func New(linksRepo *repo.Repository, linksCache *cache.LinksCache) LinksManager {
+func New(cache *cache.LinksCache, repo *repo.Repository) LinksManager {
 	return LinksManager{
-		LinksRepo:  linksRepo,
-		LinksCache: linksCache,
+		repo:  repo,
+		cache: cache,
 	}
 }
 
-func (m *LinksManager) CreateLink(c *gin.Context, longLink string, shortLink string) error {
-	return m.LinksRepo.CreateLink(c, longLink, shortLink)
+func (m *LinksManager) IsShortExists(ctx context.Context, shortLink string) (bool, error) {
+	return m.repo.IsShortExists(ctx, shortLink)
+}
+func (m *LinksManager) GetLongByShort(ctx context.Context, shortLink string) (string, error) {
+	// сначала ищем в кэше
+	longLink, err := m.cache.GetLink(shortLink)
+	if err != nil {
+		return "", fmt.Errorf("error LinksCache.GetLink: %w", err)
+	}
+
+	// если нашли, возвращаем
+	if longLink != "" {
+		return longLink, nil
+	}
+
+	// идем в бд
+	longLink, err = m.repo.GetLongByShort(ctx, shortLink)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errors2.ErrorLinkNotFound
+		}
+		return "", fmt.Errorf("error repo.GetLongByShort: %w", err)
+	}
+
+	return longLink, nil
 }
 
-func (m *LinksManager) CreateRedirect(c *gin.Context, longLink, shortLink, userAgent string) error {
-	return m.LinksRepo.CreateRedirect(c, longLink, shortLink, userAgent)
+func (m *LinksManager) CreateLink(ctx context.Context, longLink string, shortLink string) error {
+	return m.repo.CreateLink(ctx, longLink, shortLink)
 }
 
-func (m *LinksManager) GetLongByShort(c *gin.Context, shortLink string) (string, error) {
-	return m.LinksRepo.GetLongByShort(c, shortLink)
+func (m *LinksManager) StoreRedirect(ctx context.Context, params repo.StoreRedirectParams) error {
+	return m.repo.StoreRedirect(ctx, params)
 }
 
-func (m *LinksManager) GetShortByLong(c *gin.Context, longLink string) (string, error) {
-	return m.LinksRepo.GetShortByLong(c, longLink)
+func (m *LinksManager) GetRedirectsByShortLink(ctx context.Context, shortLink string) ([]repo.Redirect, error) {
+	return m.repo.GetRedirectsByShortLink(ctx, shortLink)
 }
 
-func (m *LinksManager) GetCacheLongLink(shortLink string) (string, error) {
-	return m.LinksCache.GetLink(shortLink)
+func (m *LinksManager) GetShortByLong(ctx context.Context, longLink string) (string, error) {
+	return m.repo.GetShortByLong(ctx, longLink)
 }
 
 func (m *LinksManager) GetPopularLinks(ctx context.Context, n int) ([]repo.LinkPair, error) {
-	return m.LinksRepo.GetPopularLinks(ctx, n)
-}
-
-func (m *LinksManager) Redirect(c *gin.Context, shortLink string) (string, error) {
-
-	// сначала посмотреть в кэше
-	longLink, err := m.GetCacheLongLink(shortLink)
-	if err != nil {
-		log.Println("error LinksCache.GetLink: ", err)
-	}
-
-	if longLink == "" {
-		longLink, err = m.GetLongByShort(c, shortLink)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				c.JSON(http.StatusNotFound, "Ссылка не найдена!")
-				return "", pgx.ErrNoRows
-			}
-			log.Println("GetLongByShort error: ", err)
-			c.JSON(http.StatusInternalServerError, "Произошла ошибка, попробуйте позже!")
-			return "", err
-		}
-	}
-
-	err = m.CreateRedirect(c, longLink, shortLink, c.Request.UserAgent())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, "Произошла ошибка. Попробуйте позже!")
-		log.Println("error CreateAnalytics: ", err)
-	}
-
-	c.Redirect(http.StatusTemporaryRedirect, longLink)
-	return longLink, nil
+	return m.repo.GetPopularLinks(ctx, n)
 }
